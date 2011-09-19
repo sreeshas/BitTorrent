@@ -5,7 +5,12 @@ import java.util.ArrayList;
  * @author sreenidhi
  *
  */
-public class Peer {
+public class peerProcess {
+	
+	/*
+	 * Represents unique _ID of the Peer.
+	 */
+	private String _ID;
 	
 	/*
 	 * Represents the maximum number of simultaneous connections
@@ -22,25 +27,66 @@ public class Peer {
 	/*
 	 * Represents the only instance of Peer class
 	 */
-	private Peer _instance = null;
+	private static peerProcess _instance = null;
 	
 	/*
 	 * Represents uploadRate of Peer
 	 */
-	private int uploadRate;
+	private int _uploadRate;
 	
 	/*
 	 * Represents downloadRate of Peer
 	 */
-	private int downloadRate;
+	private int _downloadRate;
 	
+	/*
+	 * Represents optimistic Unchoking Interval
+	 */
+	private int _optimisticUnchokingInterval;
+	
+	/*
+	 * Represents unchoking Interval
+	 */
+	private int _unchokingInterval;
+	
+	/*
+	 * Represents the file Name which is distributed among the peers.
+	 */
+	private String _fileName;
+	
+	/*
+	 * Represents size of File which is distributed among the peers.
+	 */
+	private String _fileSize;
+	
+	/*
+	 * File is split into pieceSize number of pieces.
+	 */
+	private int _pieceSize;
+	
+	/*
+	 * Represents the host of @Peer
+	 */
+	private String host;
+	
+	/*
+	 * Represents the port number on which the @Peer is listening.
+	 */
+	private int port;
+	
+	/*
+	 * Returns true if @Peer has complete File.
+	 */
+	private Boolean hasCompleteFile;
 	/**
 	 * Implements Singleton Design pattern for BitTorrent program
 	 * @return Peer
 	 */
-	public Peer getInstance(){
+	public static peerProcess getInstance(String peerID){
 		if(_instance==null){
-			return new Peer();
+			peerProcess peerprocess = new peerProcess();
+			peerprocess._ID=peerID;
+			return peerprocess;
 		}
 		return _instance;
 	}
@@ -48,7 +94,7 @@ public class Peer {
 	/*
 	 * Constructor is made Private to enforce singleton Design pattern
 	 */
-	private Peer(){
+	private peerProcess(){
 		_connections = new ArrayList<Connection>(_maxNoOfConnections);
 	}
 	
@@ -70,31 +116,31 @@ public class Peer {
 	* @return the uploadRate
 	*/
 	public int getUploadRate() {
-		return uploadRate;
+		return _uploadRate;
 	}
 
    /**
     * @param uploadRate the uploadRate to set
 	*/
 	public void setUploadRate(int uploadRate) {
-		this.uploadRate = uploadRate;
+		this._uploadRate = uploadRate;
 	}
 
    /**
 	* @return the downloadRate
     */
 	public int getDownloadRate() {
-		return downloadRate;
+		return _downloadRate;
 	}
 
    /**
 	* @param downloadRate the downloadRate to set
 	*/
 	public void setDownloadRate(int downloadRate) {
-		this.downloadRate = downloadRate;
+		this._downloadRate = downloadRate;
 	}
 
-   public static void main(String[] args){
-	  
-   }
+    public static void main(String[] args){
+	   peerProcess peerprocess = peerProcess.getInstance(args[0]);
+    }
 }

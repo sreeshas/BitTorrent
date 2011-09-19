@@ -23,4 +23,10 @@ public class Connection {
 	 * can communicate.
 	 */
 	private Socket _peerSocket;
+	
+	/*
+	 * To identify if the Peer represented by this Connection
+	 * is choked or not
+	 */
+	private Boolean choked;
 }
