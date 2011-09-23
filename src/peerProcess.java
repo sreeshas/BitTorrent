@@ -1,4 +1,10 @@
+import java.io.DataInputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -85,7 +91,7 @@ public class peerProcess {
 	/*
 	 * Returns true if @Peer has complete File.
 	 */
-	private Boolean hasCompleteFile;
+	private Boolean _hasCompleteFile;
 	
 	/*
 	 * Represents current working directory of the peer
@@ -97,6 +103,11 @@ public class peerProcess {
 	 * stored.
 	 */
 	private static String _dataDirectory;
+	/*
+	 * temporary directory under @_dataDirectory where file pieces 
+	 * are stored.
+	 */
+	private static String _tempDirectory;
 	
 	/*
 	 * bitmap stores information about pieces contained by
@@ -144,7 +155,8 @@ public class peerProcess {
 		_currentWorkingDirectory = System.getProperty("user.dir");
 		/* Set Data Directory */
 		 _dataDirectory =_currentWorkingDirectory+"/"+"peer_"+_ID;
-		
+		/* Set Temporary Directory */
+		 _tempDirectory=_dataDirectory+"/"+"temp";
 		
 	}
 	/* 
@@ -171,16 +183,18 @@ public class peerProcess {
 		else{
 
 			_totalPieceCount=(_fileSize/_pieceSize)+1;
-			_spillOver = _totalPieceCount%_pieceSize;
+			_spillOver = _fileSize%_pieceSize;
+			logger.info(_spillOver+"spillOver");
 		}
 		
 		/* Set bitmap */
 		bitmap = new byte[_totalPieceCount];
 
-		if(hasCompleteFile) {
+		if(_hasCompleteFile) {
             
 			/* Initialize array value to 1 */
 			Arrays.fill(bitmap, new Byte("1"));
+			initializeSeed();
 		}
 		else{
 			
@@ -196,9 +210,70 @@ public class peerProcess {
 	}
 
 	/*
-	 * 1) Determine 
+	 * 1) Create a temp directory under data directory
+	 * 2) Split the file into @_totalPieceCount  number of Pieces
 	 */
 	private void initializeSeed(){
+		createDirectory(_tempDirectory);
+		splitFile();
+		
+		
+	}
+	
+	/*
+	 * splits _fileName into _totalPieceCount number of pieces
+	 * and writes each piece to _tempDirectory under _dataDirectory
+	 * fileName of the piece is its respective piece number.
+	 * 
+	 * File _fileName should be present in _dataDirectory.
+	 */
+	private void splitFile()
+	{
+		/*Open source file  _fileName */
+		File srcFile = new File(_fileName);
+		
+		/*Load the bytes of _fileName to fileBytes array */
+		byte[] fileBytes = new byte[_fileSize];
+		long bytesRead=0;
+		DataInputStream dis = null;
+		try {
+		    dis = new DataInputStream(new FileInputStream(srcFile));
+			bytesRead = dis.read(fileBytes,0,_fileSize);
+		} catch (FileNotFoundException e) {
+			logger.info(e);
+			e.printStackTrace();
+		} catch (IOException e) {
+		    logger.info(e);
+			e.printStackTrace();
+		} 
+		if(bytesRead<_fileSize){
+			logger.info("Could not read "+_fileName+" Completely");
+			return;
+		}
+		
+		/* writing the file into pieces */
+		for(int i=0;i<_totalPieceCount;i++){
+			try {
+				OutputStream out = new FileOutputStream(_tempDirectory+"/"+i);
+				
+				/* if last Piece and there is spillOver bytes,
+				 * copy only spillOver bytes.
+				 */
+				if(i+1==_totalPieceCount && _spillOver >0 ){
+					out.write(fileBytes,(i*_pieceSize),_spillOver);
+					out.close();
+					continue;
+				}
+				out.write(fileBytes,(i*_pieceSize),_pieceSize);
+				out.close();
+			} catch (FileNotFoundException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
 		
 		
 	}
@@ -264,7 +339,20 @@ public class peerProcess {
 	public void setDownloadRate(int downloadRate) {
 		this._downloadRate = downloadRate;
 	}
-
+    
+	/**
+	 * This is a dummy method to test the proper functioning of 
+	 * private methods. This is called from TestRunner.
+	 * The method to be tested is called in this method.
+	 */
+	public void test(){
+		_fileName=_dataDirectory+"/"+"test";
+		_fileSize =348622;
+		_pieceSize=32608;
+		_hasCompleteFile=true;
+		initialize();
+		
+	}
     public static void main(String[] args){
     	
     	/* Configure Log Properties */
