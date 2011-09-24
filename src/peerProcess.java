@@ -1,8 +1,10 @@
+import java.io.BufferedWriter;
 import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -113,8 +115,8 @@ public class peerProcess {
 	 * bitmap stores information about pieces contained by
 	 * Peer
 	 */
-	private byte[] bitmap;
-	
+	private byte[] _bitmap;
+
 	/*
 	 * Contains actual length of data in final piece.
 	 */
@@ -188,18 +190,18 @@ public class peerProcess {
 		}
 		
 		/* Set bitmap */
-		bitmap = new byte[_totalPieceCount];
+		_bitmap = new byte[_totalPieceCount];
 
 		if(_hasCompleteFile) {
             
 			/* Initialize array value to 1 */
-			Arrays.fill(bitmap, new Byte("1"));
+			Arrays.fill(_bitmap, new Byte("1"));
 			initializeSeed();
 		}
 		else{
 			
 			/* Initialize array value to 0 */
-			Arrays.fill(bitmap, new Byte("0"));
+			Arrays.fill(_bitmap, new Byte("0"));
 
 		}
 	}
@@ -277,6 +279,117 @@ public class peerProcess {
 		
 		
 	}
+	/*
+	 * Compares passed peerBitmap with @bitMap and returns index of first 
+	 * occurrence in @bitmap whose byte value is 0 and peerBitmap value is one.
+	 * 
+	 * if there is no difference or difference which does not help, it returns null
+	 * 
+	 * Example
+	 * bitMap      111011
+	 * peerBitmap  111111       compareBitmap(peerBitmap) returns  3
+	 * 
+	 * bitMap      111000       
+	 * peerBitmap  000000       compareBitmap(peerBitmap) returns -1
+	 * 
+	 * bitMap      111100
+	 * peerBitmap  000111       compareBitmap(peerBitmap) returns  4
+	 * 
+	 * Not tested.
+	 */
+	private int  compareBitmap( byte[] peerBitmap){
+		
+		for(int i=0;i<peerBitmap.length;i++) {
+			if( _bitmap[i] < peerBitmap[i] ){
+				return i;
+			}
+		}
+		return -1;
+	}
+	
+	/*
+	 * combines pieces in the @_tempDirectory to form a complete file 
+	 * which is place in @_dataDirectory
+	 * Not tested.
+	 */
+	private void combineFiles(){
+	
+		OutputStream out = null;
+		try {
+			out = new FileOutputStream(_dataDirectory+"/"+_fileName);
+		} catch (FileNotFoundException e) {
+			logger.info(e);
+			return;
+		}
+		
+		
+		for(int i=0;i<_totalPieceCount;i++){
+			byte[] fileBytes=getPiece(i);
+			try {
+				out.write(fileBytes,0,fileBytes.length);
+			} catch (IOException e) {
+				logger.info(e);
+			}
+		}
+		
+		try {
+			out.close();
+		} catch (IOException e) {
+			logger.info(e);
+		}
+	}
+	/*
+	 * Inserts "pieceNumber" file into _tempDirectory.
+	 * Not tested.
+	 * 
+	 */
+	private void putPiece(byte[] fileBytes, int pieceNumber){
+		
+		try {
+			OutputStream out = new FileOutputStream(_tempDirectory+"/"+pieceNumber);
+			out.write(fileBytes,0,fileBytes.length);
+			out.close();
+		} catch (IOException e) {
+			logger.info(e);
+			
+		}
+		
+	}
+	/*
+	 * Returns content as byte array of piece "pieceNumber" which is 
+	 * present in _tempDirectory
+	 * Not tested
+	 */
+	private byte[] getPiece(int pieceNumber){
+		File pieceFile = new File(_tempDirectory+"/"+pieceNumber);
+		if(!pieceFile.exists()){
+			logger.info("Piece requested does not exist. PieceNumber = "+pieceNumber);
+			return null;
+		}
+		int pieceFileSize = (int) pieceFile.length();
+		/* TODO:sreenidhi new byte[] parameter can only be int. it does not work for pieces
+		 * whose size is greater than int limit.
+		 */
+		byte[] pieceFileBytes = new byte[(int) pieceFileSize];
+		int bytesRead=0;
+		DataInputStream dis = null;
+		try {
+		    dis = new DataInputStream(new FileInputStream(pieceFile));
+			bytesRead = dis.read(pieceFileBytes,0,pieceFileSize);
+		} catch (FileNotFoundException e) {
+			logger.info(e);
+		
+		} catch (IOException e) {
+		    logger.info(e);
+		
+		} 
+		if(bytesRead<pieceFileSize){
+			logger.info("Could not read piece"+pieceNumber+" Completely");
+			return null;
+		}
+		return pieceFileBytes;
+	}
+	
 	/*
 	 * Creates a directory if it does not exist
 	 */
