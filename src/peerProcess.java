@@ -186,7 +186,7 @@ public class peerProcess {
 
 			_totalPieceCount=(_fileSize/_pieceSize)+1;
 			_spillOver = _fileSize%_pieceSize;
-			logger.info(_spillOver+"spillOver");
+
 		}
 		
 		/* Set bitmap */
@@ -283,7 +283,7 @@ public class peerProcess {
 	 * Compares passed peerBitmap with @bitMap and returns index of first 
 	 * occurrence in @bitmap whose byte value is 0 and peerBitmap value is one.
 	 * 
-	 * if there is no difference or difference which does not help, it returns null
+	 * if there is no difference or difference which does not help, it returns -1
 	 * 
 	 * Example
 	 * bitMap      111011
@@ -295,9 +295,13 @@ public class peerProcess {
 	 * bitMap      111100
 	 * peerBitmap  000111       compareBitmap(peerBitmap) returns  4
 	 * 
-	 * Not tested.
+	 * tested for above test cases.
 	 */
 	private int  compareBitmap( byte[] peerBitmap){
+		if(_hasCompleteFile){
+			/* if peer has Complete File ,comparing bitmaps is not required.*/
+			return -1;
+		}
 		
 		for(int i=0;i<peerBitmap.length;i++) {
 			if( _bitmap[i] < peerBitmap[i] ){
@@ -310,15 +314,24 @@ public class peerProcess {
 	/*
 	 * combines pieces in the @_tempDirectory to form a complete file 
 	 * which is place in @_dataDirectory
-	 * Not tested.
+	 * 
 	 */
 	private void combineFiles(){
 	
-		OutputStream out = null;
+		FileOutputStream fos = null;
 		try {
-			out = new FileOutputStream(_dataDirectory+"/"+_fileName);
+			  File f = new File(_fileName);
+			  if(!f.exists()){
+				  f.createNewFile();
+			  }
+			  fos = new FileOutputStream(_fileName);
+			
 		} catch (FileNotFoundException e) {
 			logger.info(e);
+			return;
+		} catch (IOException e) {
+			logger.info(e);
+			e.printStackTrace();
 			return;
 		}
 		
@@ -326,21 +339,20 @@ public class peerProcess {
 		for(int i=0;i<_totalPieceCount;i++){
 			byte[] fileBytes=getPiece(i);
 			try {
-				out.write(fileBytes,0,fileBytes.length);
+				fos.write(fileBytes,0,fileBytes.length);
 			} catch (IOException e) {
 				logger.info(e);
 			}
 		}
 		
 		try {
-			out.close();
+			fos.close();
 		} catch (IOException e) {
 			logger.info(e);
 		}
 	}
 	/*
 	 * Inserts "pieceNumber" file into _tempDirectory.
-	 * Not tested.
 	 * 
 	 */
 	private void putPiece(byte[] fileBytes, int pieceNumber){
@@ -358,7 +370,7 @@ public class peerProcess {
 	/*
 	 * Returns content as byte array of piece "pieceNumber" which is 
 	 * present in _tempDirectory
-	 * Not tested
+	 * 
 	 */
 	private byte[] getPiece(int pieceNumber){
 		File pieceFile = new File(_tempDirectory+"/"+pieceNumber);
@@ -458,12 +470,19 @@ public class peerProcess {
 	 * private methods. This is called from TestRunner.
 	 * The method to be tested is called in this method.
 	 */
-	public void test(){
+	public int test(byte[] testBytes){
 		_fileName=_dataDirectory+"/"+"test";
 		_fileSize =348622;
 		_pieceSize=32608;
 		_hasCompleteFile=true;
 		initialize();
+		_bitmap[0]=1;
+		_bitmap[1]=1;
+		_bitmap[2]=1;
+		_bitmap[3]=1;
+		_bitmap[4]=0;
+		_bitmap[5]=0;
+		return compareBitmap(testBytes);
 		
 	}
     public static void main(String[] args){
