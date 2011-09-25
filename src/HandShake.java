@@ -4,8 +4,9 @@
  * @author sreenidhi
  *
  */
-public class HandShake extends AbstractMessage{
+public class HandShake {
     
 	private String _header=Constants.HANDSHAKE_HEADER;
 	private int _peerID;
+	private byte[] zeroBits = new byte[10];
 }

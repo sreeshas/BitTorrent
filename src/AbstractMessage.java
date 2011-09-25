@@ -4,9 +4,14 @@
  * Messages exchanged between Peers
  */
 public class AbstractMessage {
-    /*
-     *  Represents ID of the Message;
+    /**
+     *  Represents length of the Message.
      */
-	private int _id;
+	public int length;
+	/**
+	 *  Represents type of Message.
+	 */
+	public int type;
+	
 	
 }
