@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
+import java.util.Vector;
 
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
@@ -115,13 +117,22 @@ public class peerProcess {
 	 * bitmap stores information about pieces contained by
 	 * Peer
 	 */
-	private byte[] _bitmap;
+	private BitSet _bitmap;
 
 	/*
 	 * Contains actual length of data in final piece.
 	 */
 	
 	private int _spillOver;
+	
+	/*
+	 *  Represents a list which contains Piece Index already requested
+	 *  from other peers.
+	 *  When making a request for a Piece, Piece Index is first checked 
+	 *  with @requestList and only if the Piece is not requested,
+	 *  it is added to requestList and a request is made.
+	 */
+	private Vector<Integer> requestList = new Vector<Integer>();
 	
 	/*
 	 * Represents total number of pieces required 
@@ -190,18 +201,20 @@ public class peerProcess {
 		}
 		
 		/* Set bitmap */
-		_bitmap = new byte[_totalPieceCount];
+		_bitmap = new BitSet(_totalPieceCount);
+		
+		
 
 		if(_hasCompleteFile) {
             
-			/* Initialize array value to 1 */
-			Arrays.fill(_bitmap, new Byte("1"));
+			/* Set all bit values to true */
+			_bitmap.set(0,_totalPieceCount-1,true);
 			initializeSeed();
 		}
 		else{
 			
-			/* Initialize array value to 0 */
-			Arrays.fill(_bitmap, new Byte("0"));
+			/* Set all bit values to false . BitSet by default is initialized to false*/
+			
 
 		}
 	}
@@ -297,17 +310,27 @@ public class peerProcess {
 	 * 
 	 * tested for above test cases.
 	 */
-	private int  compareBitmap( byte[] peerBitmap){
+	private int  compareBitmap( BitSet peerBitmap){
+		
 		if(_hasCompleteFile){
 			/* if peer has Complete File ,comparing bitmaps is not required.*/
 			return -1;
 		}
-		
-		for(int i=0;i<peerBitmap.length;i++) {
-			if( _bitmap[i] < peerBitmap[i] ){
-				return i;
+		int index = 0;
+		while(index != -1){
+			/* Find the index of next bit which is set to false starting from <code>index</code>*/
+			
+			index = _bitmap.nextClearBit(index);
+		    
+			if(index != -1) {
+				if(peerBitmap.get(index)){
+					/* return index, when _bitmap does not have the bit set whereas peerBitmap bit is set. */
+					return index;
+				}
 			}
+			
 		}
+		
 		return -1;
 	}
 	
@@ -470,18 +493,16 @@ public class peerProcess {
 	 * private methods. This is called from TestRunner.
 	 * The method to be tested is called in this method.
 	 */
-	public int test(byte[] testBytes){
+	public int test(BitSet testBytes){
 		_fileName=_dataDirectory+"/"+"test";
 		_fileSize =348622;
 		_pieceSize=32608;
 		_hasCompleteFile=true;
 		initialize();
-		_bitmap[0]=1;
-		_bitmap[1]=1;
-		_bitmap[2]=1;
-		_bitmap[3]=1;
-		_bitmap[4]=0;
-		_bitmap[5]=0;
+		
+		
+		
+
 		return compareBitmap(testBytes);
 		
 	}
