@@ -1,3 +1,4 @@
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.DataInputStream;
 import java.io.File;
@@ -6,10 +7,15 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.HashMap;
+import java.util.Properties;
+import java.util.StringTokenizer;
 import java.util.Vector;
 
 import org.apache.log4j.Logger;
@@ -141,6 +147,17 @@ public class peerProcess {
 	 */
 	private int _totalPieceCount;
 	
+	/*
+	 * Stores <code>_bitmap</code> of each peer with its <code>_ID<code> as key and 
+	 * its corresponding <code>_bitmap</code> as value.
+	 */
+	private HashMap<String,BitSet> _bitMapper = new HashMap<String,BitSet>();
+	
+	/*
+	 * Represents number of Preferred Neighbors.
+	 */
+	private int _noOfPreferredNeighbors;
+	
 	/**
 	 * Implements Singleton Design pattern for BitTorrent program
 	 * @return Peer
@@ -172,6 +189,73 @@ public class peerProcess {
 		 _tempDirectory=_dataDirectory+"/"+"temp";
 		
 	}
+	
+	/*
+	 * Loads configuration Data.
+	 * There are 2 configuration files ( *.cfg) PeerInfo.cfg and Common.cfg
+	 */
+	private void loadConfiguration(){
+		Properties prop = new Properties();
+		/* Loading properties from Common.cfg */
+	    String fileName = _currentWorkingDirectory+ "/" + "Common.cfg";
+	    InputStream is;
+		try {
+			is = new FileInputStream(fileName);
+			prop.load(is);
+			_noOfPreferredNeighbors = Integer.parseInt(prop.getProperty("NumberOfPreferredNeighbors"));
+			_unchokingInterval = Integer.parseInt(prop.getProperty("UnchokingInterval"));
+			_optimisticUnchokingInterval = Integer.parseInt(prop.getProperty("OptimisticUnchokingInterval"));
+			_fileName = prop.getProperty("FileName");
+			_fileSize = Integer.parseInt(prop.getProperty("FileSize"));
+			_pieceSize = Integer.parseInt(prop.getProperty("PieceSize"));
+			logger.info(_noOfPreferredNeighbors +" "+_unchokingInterval+" "+ _optimisticUnchokingInterval+" "+_fileName+" "+_fileSize+" "+_pieceSize);
+		} catch (FileNotFoundException e) {
+			logger.info(e);
+			
+		} catch (IOException e) {
+			logger.info(e);
+			
+		}
+		/* Loading properties from PeerInfo.cfg */
+		fileName = _currentWorkingDirectory+ "/" + "PeerInfo.cfg";
+		try {
+			FileInputStream fstream = new FileInputStream(fileName);
+			DataInputStream in = new DataInputStream(fstream);
+			BufferedReader br = new BufferedReader(new InputStreamReader(in));
+			String strLine;
+			  
+			while ((strLine = br.readLine()) != null)   {
+			   
+				StringTokenizer st  = new StringTokenizer(strLine);
+				while(st.hasMoreTokens()){
+					String _peerID = st.nextToken();
+					String _host = st.nextToken();
+					int _port = Integer.parseInt(st.nextToken());
+					Boolean _hasCompleteFile;
+					if(Integer.parseInt(st.nextToken())==1){
+					  _hasCompleteFile = true;
+					}
+					else {
+					  _hasCompleteFile = false;
+					}
+					logger.info(_peerID+" "+_host+" "+ _port+" "+_hasCompleteFile);
+			        Connection c1 = new Connection(_peerID,_host,_port,_hasCompleteFile);
+					_connections.add(c1);
+				}
+			
+			}
+			 
+			in.close();
+		} catch (FileNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+	    
+	}
 	/* 
 	 * 1) Create data directory if it does not exist.
 	 * 
@@ -200,9 +284,10 @@ public class peerProcess {
 
 		}
 		
-		/* Set bitmap */
+		/* Set _bitmap */
 		_bitmap = new BitSet(_totalPieceCount);
-		
+		/* Add the _bitmap to _bitMapper */
+		_bitMapper.put(_ID,_bitmap);
 		
 
 		if(_hasCompleteFile) {
@@ -214,7 +299,7 @@ public class peerProcess {
 		else{
 			
 			/* Set all bit values to false . BitSet by default is initialized to false*/
-			
+			intializeLeech();
 
 		}
 	}
@@ -402,7 +487,8 @@ public class peerProcess {
 			return null;
 		}
 		int pieceFileSize = (int) pieceFile.length();
-		/* TODO:sreenidhi new byte[] parameter can only be int. it does not work for pieces
+		/* TODO:sreenidhi 
+		 * new byte[] parameter can only be int. it does not work for pieces
 		 * whose size is greater than int limit.
 		 */
 		byte[] pieceFileBytes = new byte[(int) pieceFileSize];
@@ -493,17 +579,14 @@ public class peerProcess {
 	 * private methods. This is called from TestRunner.
 	 * The method to be tested is called in this method.
 	 */
-	public int test(BitSet testBytes){
-		_fileName=_dataDirectory+"/"+"test";
-		_fileSize =348622;
-		_pieceSize=32608;
-		_hasCompleteFile=true;
-		initialize();
+	public void test(){
+//		_fileName=_dataDirectory+"/"+"test";
+//		_fileSize =348622;
+//		_pieceSize=32608;
+//		_hasCompleteFile=true;
+		//initialize();
+		loadConfiguration();
 		
-		
-		
-
-		return compareBitmap(testBytes);
 		
 	}
     public static void main(String[] args){
