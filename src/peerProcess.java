@@ -14,9 +14,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 import java.util.StringTokenizer;
 import java.util.Vector;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
@@ -36,17 +38,13 @@ public class peerProcess {
 	 */
 	private static String _ID;
 	
-	/*
-	 * Represents the maximum number of simultaneous connections
-	 * a Peer can have with other peers
-	 */
-	private int _maxNoOfConnections;
+	
 	
 	/*
 	 * List of Connection objects which represent the connections
 	 * to Other peers
 	 */
-	private ArrayList<Connection> _connections;
+	private Vector<Connection> _connections;
 	
 	/*
 	 * Represents the only instance of Peer class
@@ -101,12 +99,12 @@ public class peerProcess {
 	/*
 	 * Returns true if @Peer has complete File.
 	 */
-	private Boolean _hasCompleteFile;
+	private static volatile Boolean _hasCompleteFile;
 	
 	/*
 	 * Represents current working directory of the peer
 	 */
-	private String _currentWorkingDirectory;
+	private static String _currentWorkingDirectory;
 	
 	/*
 	 * Represents data directory where peer files are 
@@ -120,16 +118,17 @@ public class peerProcess {
 	private static String _tempDirectory;
 	
 	/*
-	 * bitmap stores information about pieces contained by
-	 * Peer
+	 * bitmap stores information about pieces contained by Peer
+	 * @GuardedBy("this")
 	 */
-	private BitSet _bitmap;
+	
+	 private BitSet _bitmap;
 
 	/*
 	 * Contains actual length of data in final piece.
 	 */
 	
-	private int _spillOver;
+	private static int _spillOver;
 	
 	/*
 	 *  Represents a list which contains Piece Index already requested
@@ -145,19 +144,40 @@ public class peerProcess {
 	 * for having complete file. 
 	 * 
 	 */
-	private int _totalPieceCount;
+	private static int _totalPieceCount;
 	
 	/*
 	 * Stores <code>_bitmap</code> of each peer with its <code>_ID<code> as key and 
 	 * its corresponding <code>_bitmap</code> as value.
 	 */
-	private HashMap<String,BitSet> _bitMapper = new HashMap<String,BitSet>();
+	//private HashMap<String,BitSet> _bitMapper = new HashMap<String,BitSet>();
+	private Map<String,BitSet> _bitMapper = new ConcurrentHashMap<String,BitSet>();
 	
 	/*
 	 * Represents number of Preferred Neighbors.
 	 */
-	private int _noOfPreferredNeighbors;
+	private static int _noOfPreferredNeighbors;
 	
+	/*
+	 * Indicates total number of Pieces with the Peer.
+	 * @GuardedBy("this")
+	 */
+	private static volatile int _currentPieceCount;
+	
+	
+	/*
+	 * Used to identify the next bit in the _bitmap 
+	 * whose bit is not set.
+	 * @GuardedBy("this")
+	 */
+	private static volatile int  _currentIndex;
+	/**
+	 * @return the _currentPieceCount
+	 */
+	private static synchronized int get_currentPieceCount() {
+		return _currentPieceCount;
+	}
+
 	/**
 	 * Implements Singleton Design pattern for BitTorrent program
 	 * @return Peer
@@ -177,10 +197,58 @@ public class peerProcess {
 	/*
 	 * Constructor is made Private to enforce singleton Design pattern
 	 */
-	private peerProcess(){
+	private peerProcess() {
 		
-		/* Set maximum number of connections */
-		_connections = new ArrayList<Connection>(_maxNoOfConnections);
+    }
+	
+	/*
+	 * whenever a thread completely downloads a piece from a Peer,
+	 * this method is called. It first checks if the Piece was initially not 
+	 * present with this Peer and then increments the no of Pieces present with 
+	 * this Peer.
+	 * 
+	 * when _noOfPieces equals _totalNoOfPieces download is complete.
+	 * 
+	 * Not Tested..
+	 */
+	private synchronized void incrementPieces(int PieceID){
+		if( _bitmap.get(PieceID) == false ) {
+			_currentPieceCount++;
+			_bitmap.set(PieceID);
+		}
+		
+	}
+	
+	/*
+	 *  Returns the next Clear Bit from starting from _currentIndex.
+	 *  it returns -1 if all the bits in _bitmap are set.
+	 *  
+	 *  if the _currentIndex reaches size of the _bitmap and
+	 *  _noOfPiecesPresent is not equal to _totalNoOfPieces
+	 *  it wraps over the _bitmap array and starts again.
+	 *  
+	 *  Not Tested.
+	 */
+	private synchronized int getNextClearBit(){
+		int nextClearBit = _bitmap.nextClearBit(_currentIndex);
+		_currentIndex = nextClearBit;
+		if( (nextClearBit == -1) && (_currentPieceCount != _totalPieceCount)){
+			_currentIndex = 0;
+			nextClearBit = _bitmap.nextClearBit(_currentIndex);
+			_currentIndex = nextClearBit;
+		}
+		return nextClearBit;
+	}
+	/*
+	 * Loads configuration Data.
+	 * There are 2 configuration files ( *.cfg) PeerInfo.cfg and Common.cfg
+	 * 
+	 * 1) Properties are initialized.
+	 * 
+	 * 2) Connection objects are created for all Peers and added to a list. 
+	 *    (Sockets  of the connection are not established yet.)
+	 */
+	private void loadConfiguration(){
 		/* Set current working directory */
 		_currentWorkingDirectory = System.getProperty("user.dir");
 		/* Set Data Directory */
@@ -188,13 +256,6 @@ public class peerProcess {
 		/* Set Temporary Directory */
 		 _tempDirectory=_dataDirectory+"/"+"temp";
 		
-	}
-	
-	/*
-	 * Loads configuration Data.
-	 * There are 2 configuration files ( *.cfg) PeerInfo.cfg and Common.cfg
-	 */
-	private void loadConfiguration(){
 		Properties prop = new Properties();
 		/* Loading properties from Common.cfg */
 	    String fileName = _currentWorkingDirectory+ "/" + "Common.cfg";
@@ -208,6 +269,7 @@ public class peerProcess {
 			_fileName = prop.getProperty("FileName");
 			_fileSize = Integer.parseInt(prop.getProperty("FileSize"));
 			_pieceSize = Integer.parseInt(prop.getProperty("PieceSize"));
+			logger.info("_noOfPreferredNeighbors" +" "+"_unchokingInterval"+" "+" _optimisticUnchokingInterval"+" "+"_fileName"+" "+"_fileSize"+" "+"_pieceSize");
 			logger.info(_noOfPreferredNeighbors +" "+_unchokingInterval+" "+ _optimisticUnchokingInterval+" "+_fileName+" "+_fileSize+" "+_pieceSize);
 		} catch (FileNotFoundException e) {
 			logger.info(e);
@@ -216,6 +278,8 @@ public class peerProcess {
 			logger.info(e);
 			
 		}
+		/* Set maximum number of connections */
+		_connections = new Vector<Connection>(_noOfPreferredNeighbors);
 		/* Loading properties from PeerInfo.cfg */
 		fileName = _currentWorkingDirectory+ "/" + "PeerInfo.cfg";
 		try {
@@ -239,18 +303,26 @@ public class peerProcess {
 					  _hasCompleteFile = false;
 					}
 					logger.info(_peerID+" "+_host+" "+ _port+" "+_hasCompleteFile);
+					if(_peerID.equals(_ID)){
+						host = _host;
+						port = _port;
+						peerProcess._hasCompleteFile = _hasCompleteFile;
+					}
+					else{
+					
 			        Connection c1 = new Connection(_peerID,_host,_port,_hasCompleteFile);
 					_connections.add(c1);
+					
+					}
 				}
 			
 			}
-			 
 			in.close();
 		} catch (FileNotFoundException e) {
-			// TODO Auto-generated catch block
+			logger.info(e);
 			e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
+			logger.info(e);
 			e.printStackTrace();
 		}
 		
@@ -267,10 +339,10 @@ public class peerProcess {
 	 *  
 	 * 4) Initialize the bitmap
 	 */
-	private void initialize(){
-		/* Create Data Directory if it does not exist */
+	private synchronized void initialize(){
+		/* Create Data Directory and temp Directory if it does not exist */
 		createDirectory(_dataDirectory);
-
+		createDirectory(_tempDirectory);
 		/* Set totalPieceCount */ 
 		if(_fileSize%_pieceSize == 0){
 
@@ -286,26 +358,38 @@ public class peerProcess {
 		
 		/* Set _bitmap */
 		_bitmap = new BitSet(_totalPieceCount);
-		/* Add the _bitmap to _bitMapper */
-		_bitMapper.put(_ID,_bitmap);
+		
 		
 
 		if(_hasCompleteFile) {
             
 			/* Set all bit values to true */
 			_bitmap.set(0,_totalPieceCount-1,true);
-			initializeSeed();
+			/* Add the _bitmap to _bitMapper */
+			_bitMapper.put(_ID,_bitmap);
+			seedFunction();
 		}
 		else{
 			
 			/* Set all bit values to false . BitSet by default is initialized to false*/
-			intializeLeech();
+			/* Add the _bitmap to _bitMapper */
+			_bitMapper.put(_ID,_bitmap);
+			leechFunction();
 
 		}
 	}
-	
+	private void seedFunction(){
+		initializeSeed();
+		engageHandshake();
+	}
+	private void leechFunction(){
+		intializeLeech();
+	}
 	private void intializeLeech() {
-		// TODO Auto-generated method stub
+		
+		
+	}
+	private void engageHandshake(){
 		
 	}
 
@@ -314,16 +398,14 @@ public class peerProcess {
 	 * 2) Split the file into @_totalPieceCount  number of Pieces
 	 */
 	private void initializeSeed(){
-		createDirectory(_tempDirectory);
+		
 		splitFile();
-		
-		
 	}
 	
 	/*
-	 * splits _fileName into _totalPieceCount number of pieces
-	 * and writes each piece to _tempDirectory under _dataDirectory
-	 * fileName of the piece is its respective piece number.
+	 * splits _fileName file into _totalPieceCount number of pieces
+	 * and writes each piece to _tempDirectory under _dataDirectory.
+	 * fileName of a piece is its respective piece number.
 	 * 
 	 * File _fileName should be present in _dataDirectory.
 	 */
@@ -395,7 +477,7 @@ public class peerProcess {
 	 * 
 	 * tested for above test cases.
 	 */
-	private int  compareBitmap( BitSet peerBitmap){
+	private synchronized int  compareBitmap( BitSet peerBitmap){
 		
 		if(_hasCompleteFile){
 			/* if peer has Complete File ,comparing bitmaps is not required.*/
@@ -533,59 +615,57 @@ public class peerProcess {
 	}
 
    /**
-	* @return the _maxNoOfConnections
+	* @return the _noOfPreferredNeighbors
 	*/
-	public int get_maxNoOfConnections() {
-		return _maxNoOfConnections;
+	public int get_noOfPreferredNeighbors() {
+		return _noOfPreferredNeighbors;
 	}
 
-   /**
-	* @param maxNoOfConnections the _maxNoOfConnections to set
-	*/
-	public void set_maxNoOfConnections(int maxNoOfConnections) {
-		_maxNoOfConnections = maxNoOfConnections;
-	}
+   
 
    /**
 	* @return the uploadRate
 	*/
-	public int getUploadRate() {
+	public synchronized int getUploadRate() {
 		return _uploadRate;
 	}
 
    /**
     * @param uploadRate the uploadRate to set
 	*/
-	public void setUploadRate(int uploadRate) {
+	public synchronized void setUploadRate(int uploadRate) {
 		this._uploadRate = uploadRate;
 	}
 
    /**
 	* @return the downloadRate
     */
-	public int getDownloadRate() {
+	public synchronized int getDownloadRate() {
 		return _downloadRate;
 	}
 
    /**
 	* @param downloadRate the downloadRate to set
 	*/
-	public void setDownloadRate(int downloadRate) {
+	public synchronized void setDownloadRate(int downloadRate) {
 		this._downloadRate = downloadRate;
 	}
     
+	
 	/**
 	 * This is a dummy method to test the proper functioning of 
 	 * private methods. This is called from TestRunner.
 	 * The method to be tested is called in this method.
 	 */
 	public void test(){
+		 loadConfiguration();
+		 initialize();
 //		_fileName=_dataDirectory+"/"+"test";
 //		_fileSize =348622;
 //		_pieceSize=32608;
 //		_hasCompleteFile=true;
 		//initialize();
-		loadConfiguration();
+		//loadConfiguration();
 		
 		
 	}
@@ -595,5 +675,7 @@ public class peerProcess {
     	PropertyConfigurator.configure("log4j.properties");
     	
     	peerProcess peerprocess = peerProcess.getInstance(args[0]);
+    	
+    	
     }
 }

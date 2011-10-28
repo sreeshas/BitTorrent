@@ -9,7 +9,7 @@ public class Connection {
 	/*
 	 * _ID of the peer to whom this connection belongs.
 	 */
-	private String _peerID;
+	private final String _peerID;
     /*
      * Represents uploadRate of Peer 
      * associate with the Connection
@@ -36,11 +36,11 @@ public class Connection {
 	/*
 	 * Represents Host Address of the Connection.
 	 */
-	private String _host;
+	private final String _host;
 	/*
 	 * Listening port of the Host.
 	 */
-	private int  _port;
+	private  final int  _port;
 	/*
 	 * Indicates whether this Connection has complete File or not.
 	 */
@@ -59,12 +59,7 @@ public class Connection {
 	public String get_peerID() {
 		return _peerID;
 	}
-	/**
-	 * @param peerID the _peerID to set
-	 */
-	public void set_peerID(String peerID) {
-		_peerID = peerID;
-	}
+	
 	/**
 	 * @return the _uploadRate
 	 */
@@ -119,24 +114,14 @@ public class Connection {
 	public String get_host() {
 		return _host;
 	}
-	/**
-	 * @param host the _host to set
-	 */
-	public void set_host(String host) {
-		_host = host;
-	}
+	
 	/**
 	 * @return the _port
 	 */
 	public int get_port() {
 		return _port;
 	}
-	/**
-	 * @param port the _port to set
-	 */
-	public void set_port(int port) {
-		_port = port;
-	}
+	
 	/**
 	 * @return the _hasCompleteFile
 	 */
