@@ -10,6 +10,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.ConnectException;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -44,7 +48,7 @@ public class peerProcess {
 	 * List of Connection objects which represent the connections
 	 * to Other peers
 	 */
-	private Vector<Connection> _connections;
+	private static  Vector<Connection> _connections ;
 	
 	/*
 	 * Represents the only instance of Peer class
@@ -269,8 +273,8 @@ public class peerProcess {
 			_fileName = prop.getProperty("FileName");
 			_fileSize = Integer.parseInt(prop.getProperty("FileSize"));
 			_pieceSize = Integer.parseInt(prop.getProperty("PieceSize"));
-			logger.info("_noOfPreferredNeighbors" +" "+"_unchokingInterval"+" "+" _optimisticUnchokingInterval"+" "+"_fileName"+" "+"_fileSize"+" "+"_pieceSize");
-			logger.info(_noOfPreferredNeighbors +" "+_unchokingInterval+" "+ _optimisticUnchokingInterval+" "+_fileName+" "+_fileSize+" "+_pieceSize);
+			//logger.info("_noOfPreferredNeighbors" +" "+"_unchokingInterval"+" "+" _optimisticUnchokingInterval"+" "+"_fileName"+" "+"_fileSize"+" "+"_pieceSize");
+			//logger.info(_noOfPreferredNeighbors +" "+_unchokingInterval+" "+ _optimisticUnchokingInterval+" "+_fileName+" "+_fileSize+" "+_pieceSize);
 		} catch (FileNotFoundException e) {
 			logger.info(e);
 			
@@ -302,7 +306,7 @@ public class peerProcess {
 					else {
 					  _hasCompleteFile = false;
 					}
-					logger.info(_peerID+" "+_host+" "+ _port+" "+_hasCompleteFile);
+					//logger.info(_peerID+" "+_host+" "+ _port+" "+_hasCompleteFile);
 					if(_peerID.equals(_ID)){
 						host = _host;
 						port = _port;
@@ -310,7 +314,7 @@ public class peerProcess {
 					}
 					else{
 					
-			        Connection c1 = new Connection(_peerID,_host,_port,_hasCompleteFile);
+			      final Connection c1 = new Connection(_peerID,_host,_port,_hasCompleteFile);
 					_connections.add(c1);
 					
 					}
@@ -380,17 +384,92 @@ public class peerProcess {
 	}
 	private void seedFunction(){
 		initializeSeed();
-		engageHandshake();
+		initiateConnection();
 	}
 	private void leechFunction(){
 		intializeLeech();
 	}
 	private void intializeLeech() {
 		
-		
+		initiateConnection();
 	}
-	private void engageHandshake(){
-		
+	private void initiateConnection(){
+		ArrayList<Thread> threadList = new ArrayList<Thread>();
+		try {
+			final ServerSocket welcomeSocket = new ServerSocket(port);
+			
+			for(final Connection c: _connections){
+				Runnable r1 = new Runnable(){
+					@Override
+					public void run(){
+						if(c.get_peerSocket()!=null){
+
+						}
+						Socket connection = null;
+						if(Integer.parseInt(c.get_peerID()) > Integer.parseInt(_ID)){
+
+							try {
+								connection = welcomeSocket.accept();
+								logger.info("Connected to "+connection);
+								c.set_peerSocket(connection);
+							} catch (IOException e) {
+								e.printStackTrace();
+							}
+
+						}
+						else{
+
+							try {
+								connection = new Socket(c.get_host(),c.get_port());
+								logger.info("Connected to "+connection);
+								c.set_peerSocket(connection);
+							}
+							catch(ConnectException cr){
+								try {
+									logger.info("Waiting for other peers to start");
+									Thread.sleep(2000);
+									run();
+								} catch (InterruptedException e) {
+
+									e.printStackTrace();
+								}
+
+
+							}
+							catch (UnknownHostException e) {
+
+								e.printStackTrace();
+							} catch (IOException e) {
+
+								e.printStackTrace();
+							} 
+
+						}
+					}
+				};
+
+				Thread t1 = new Thread(r1);
+				t1.start();
+				threadList.add(t1);
+				
+				
+
+			}
+		} catch (IOException e) {
+			logger.info(e);
+			e.printStackTrace();
+		}
+		for(Thread t: threadList){
+			try {
+				t.join();
+			} catch (InterruptedException e) {
+				
+				e.printStackTrace();
+			}
+		}
+
+		logger.info("All peers are now connected.");
+
 	}
 
 	/*
@@ -600,7 +679,7 @@ public class peerProcess {
 	   
 	   File f = new File(dirName);
 	   if(f.exists()){
-		   logger.info("Directory: " + dirName + " already exists"); 
+		  // logger.info("Directory: " + dirName + " already exists"); 
 		   return;
 	   }
 	   boolean success = (new File(dirName)).mkdir();
@@ -675,6 +754,7 @@ public class peerProcess {
     	PropertyConfigurator.configure("log4j.properties");
     	
     	peerProcess peerprocess = peerProcess.getInstance(args[0]);
+    	peerprocess.test();
     	
     	
     }

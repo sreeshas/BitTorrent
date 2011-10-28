@@ -5,7 +5,7 @@ import java.net.Socket;
  * @author sreenidhi
  *
  */
-public class Connection {
+public final class Connection {
 	/*
 	 * _ID of the peer to whom this connection belongs.
 	 */
