@@ -9,6 +9,8 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.net.ConnectException;
 import java.net.ServerSocket;
@@ -20,6 +22,7 @@ import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Random;
 import java.util.StringTokenizer;
 import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
@@ -175,13 +178,18 @@ public class peerProcess {
 	 * @GuardedBy("this")
 	 */
 	private static volatile int  _currentIndex;
-	/**
+	
+	/*
+	 * Represents preferred NeighborList.
+	 */
+	private ArrayList<Connection> _preferredNeighborList;
+ 	/**
 	 * @return the _currentPieceCount
 	 */
 	private static synchronized int get_currentPieceCount() {
 		return _currentPieceCount;
 	}
-
+    
 	/**
 	 * Implements Singleton Design pattern for BitTorrent program
 	 * @return Peer
@@ -192,7 +200,6 @@ public class peerProcess {
 			/* Set Peer ID */
 			_ID=peerID;
 			peerProcess peerprocess = new peerProcess();
-			
 			return peerprocess;
 		}
 		return _instance;
@@ -410,8 +417,11 @@ public class peerProcess {
 
 							try {
 								connection = welcomeSocket.accept();
-								logger.info("Connected to "+connection);
+								
+								logger.info("Peer"+" "+_ID+" "+"is connected from"+" "+"Peer"+c.get_peerID());
 								c.set_peerSocket(connection);
+								c.set_oos(new ObjectOutputStream(connection.getOutputStream()));
+								c.set_ois(new ObjectInputStream(connection.getInputStream()));
 							} catch (IOException e) {
 								e.printStackTrace();
 							}
@@ -421,8 +431,10 @@ public class peerProcess {
 
 							try {
 								connection = new Socket(c.get_host(),c.get_port());
-								logger.info("Connected to "+connection);
+								logger.info("Peer"+" "+_ID+" "+"makes connection to"+" "+"Peer"+c.get_peerID());
 								c.set_peerSocket(connection);
+								c.set_oos(new ObjectOutputStream(connection.getOutputStream()));
+								c.set_ois(new ObjectInputStream(connection.getInputStream()));
 							}
 							catch(ConnectException cr){
 								try {
@@ -620,6 +632,30 @@ public class peerProcess {
 			logger.info(e);
 		}
 	}
+	/**
+	 *  Returns list of connections who are "interested".
+	 */
+	public synchronized ArrayList<Connection> getInterested() {
+		ArrayList<Connection> interestedList = new ArrayList<Connection>();
+		for(Connection c: _connections) {
+			if(c.getInterested()==true) {
+				interestedList.add(c);
+			}
+		}
+		return interestedList;
+	}
+	/**
+	 * Returns list of Connections whose Peers are not choked.
+	 */
+	public synchronized ArrayList<Connection> getUnchokedList() {
+		ArrayList<Connection> unchokedList = new ArrayList<Connection>();
+		for(Connection c: _connections) {
+			if(c.getChoked()==false) {
+				unchokedList.add(c);
+			}
+		}
+		return unchokedList;
+	}
 	/*
 	 * Inserts "pieceNumber" file into _tempDirectory.
 	 * 
@@ -671,7 +707,47 @@ public class peerProcess {
 		}
 		return pieceFileBytes;
 	}
-	
+   /**
+    * selects preferred Neighbors for every <code>_unchokingInterval</code>
+    * @return <code> _preferredNeighborList </code>
+    */
+   public ArrayList<Connection> selectPreferredNeighbors(){
+	  
+	   _preferredNeighborList = new ArrayList<Connection>(_noOfPreferredNeighbors);
+	   
+	   /* if peer has complete file, select preferred neighbors randomly
+	    * from peers who are "interested".
+	    */ 
+	   if(_hasCompleteFile) {
+		ArrayList<Connection> interestedList = getInterested();
+		ArrayList<Integer> alreadySelected =  new ArrayList<Integer>();
+		Random rand = new Random();
+		int min=0, max=_noOfPreferredNeighbors;
+
+		while(alreadySelected.size()!=max) {
+			int randomNum = rand.nextInt(max - min + 1) + min;
+			if(!alreadySelected.contains(randomNum)) {
+				alreadySelected.add(randomNum);
+			}
+		}
+	    for(Integer i: alreadySelected){
+		   _preferredNeighborList.add(interestedList.get(i));
+	    }
+	   	   return _preferredNeighborList;
+	   	}
+	   	else {
+		/*
+		 * yet to be implemented..   
+		 */
+		   return _preferredNeighborList;   
+	   	}
+   }
+   /**
+    * Selects optimistically unchoked neighbor for every <code>_optimisticUnchokingInterval</code>
+    */
+   public void selectOptimisticNeighbor(){
+	   
+   }
 	/*
 	 * Creates a directory if it does not exist
 	 */
@@ -729,7 +805,41 @@ public class peerProcess {
 	public synchronized void setDownloadRate(int downloadRate) {
 		this._downloadRate = downloadRate;
 	}
-    
+    /**
+     * @param ois
+     * @return AbstractMessage
+     * 
+     * Used to read Message from other peers.
+     */
+	public AbstractMessage read(ObjectInputStream ois){
+		AbstractMessage aM =null;
+		try {
+			aM  = (AbstractMessage) ois.readObject();
+			return aM;
+		} catch (IOException e) {
+
+			logger.debug("Read Exception",e);
+		} catch (ClassNotFoundException e) {
+
+		    logger.debug("Read Exception",e);
+		}
+		return aM;
+	}
+	
+	/**
+	 * @param oos
+	 * @param aM
+	 * Used to write Messages to hosts
+	 */
+	public void write(ObjectOutputStream oos, AbstractMessage aM){
+		try {
+			oos.writeObject(aM);
+			oos.flush();
+			} 
+		catch (IOException e) {
+			logger.debug("Write Exception",e);
+		}
+	}
 	
 	/**
 	 * This is a dummy method to test the proper functioning of 
@@ -739,12 +849,7 @@ public class peerProcess {
 	public void test(){
 		 loadConfiguration();
 		 initialize();
-//		_fileName=_dataDirectory+"/"+"test";
-//		_fileSize =348622;
-//		_pieceSize=32608;
-//		_hasCompleteFile=true;
-		//initialize();
-		//loadConfiguration();
+
 		
 		
 	}

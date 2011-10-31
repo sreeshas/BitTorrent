@@ -1,3 +1,5 @@
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.Socket;
 
 /**
@@ -46,6 +48,34 @@ public final class Connection {
 	 */
 	private Boolean _hasCompleteFile;
 	
+	/*
+	 * To Read Messages sent from host representing this connection.
+	 */
+	private ObjectInputStream _ois;
+	
+	/*
+	 * To Write Messages to the host represented by this connection.
+	 */
+	private ObjectOutputStream _oos;
+	
+	/*
+	 * Represents if this connection is interested in receiving pieces 
+	 * from this Peer.
+	 */
+	private Boolean interested;
+	
+	/**
+	 * @return the interested
+	 */
+	synchronized Boolean getInterested() {
+		return interested;
+	}
+	/**
+	 * @param interested the interested to set
+	 */
+	synchronized void setInterested(Boolean interested) {
+		this.interested = interested;
+	}
 	public Connection(String _peerID, String _host, int _port, Boolean _hasCompleteFile) {
 		this._peerID = _peerID;
 		this._host = _host;
@@ -133,6 +163,30 @@ public final class Connection {
 	 */
 	public void set_hasCompleteFile(Boolean hasCompleteFile) {
 		_hasCompleteFile = hasCompleteFile;
+	}
+	/**
+	 * @return the _ois
+	 */
+	private synchronized ObjectInputStream get_ois() {
+		return _ois;
+	}
+	/**
+	 * @param _ois the _ois to set
+	 */
+	 synchronized void set_ois(ObjectInputStream _ois) {
+		this._ois = _ois;
+	}
+	/**
+	 * @return the _oos
+	 */
+	private synchronized ObjectOutputStream get_oos() {
+		return _oos;
+	}
+	/**
+	 * @param _oos the _oos to set
+	 */
+	synchronized void set_oos(ObjectOutputStream _oos) {
+		this._oos = _oos;
 	}
 	
 	
