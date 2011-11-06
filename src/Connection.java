@@ -167,7 +167,7 @@ public final class Connection {
 	/**
 	 * @return the _ois
 	 */
-	private synchronized ObjectInputStream get_ois() {
+	 synchronized ObjectInputStream get_ois() {
 		return _ois;
 	}
 	/**
@@ -179,7 +179,7 @@ public final class Connection {
 	/**
 	 * @return the _oos
 	 */
-	private synchronized ObjectOutputStream get_oos() {
+	 synchronized ObjectOutputStream get_oos() {
 		return _oos;
 	}
 	/**

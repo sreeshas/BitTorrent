@@ -8,4 +8,6 @@ public class Have extends AbstractMessage{
 	 * Stores type number of Choke Message;
 	 */
 	public int type=4;
+	
+	
 }

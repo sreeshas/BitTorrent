@@ -3,7 +3,8 @@ import java.io.Serializable;
 
 public class Piece extends AbstractMessage implements Serializable{
  
-  /**
+ 
+/**
    *  Represents the ID of piece which also serves
    *  as its filenumber.
    */
