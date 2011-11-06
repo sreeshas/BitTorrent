@@ -24,11 +24,17 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
 import java.util.StringTokenizer;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.log4j.Appender;
+import org.apache.log4j.FileAppender;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
+import org.apache.log4j.RollingFileAppender;
+import org.apache.log4j.SimpleLayout;
 
 /**
  * This is main class for the BitTorrent Project.
@@ -45,11 +51,10 @@ public class peerProcess {
 	 */
 	private static String _ID;
 	
-	
-	
 	/*
 	 * List of Connection objects which represent the connections
 	 * to Other peers
+	 * @GuardedBy ("this")
 	 */
 	private static  Vector<Connection> _connections ;
 	
@@ -129,7 +134,7 @@ public class peerProcess {
 	 * @GuardedBy("this")
 	 */
 	
-	 private BitSet _bitmap;
+	private BitSet _bitmap;
 
 	/*
 	 * Contains actual length of data in final piece.
@@ -183,12 +188,19 @@ public class peerProcess {
 	 * Represents preferred NeighborList.
 	 */
 	private ArrayList<Connection> _preferredNeighborList;
+	/*
+	 * List of peers which are not connection yet.populated by loadConfiguration()
+	 */
+    private ArrayList<Connection> _peerList = new ArrayList<Connection>();
  	/**
 	 * @return the _currentPieceCount
 	 */
 	private static synchronized int get_currentPieceCount() {
 		return _currentPieceCount;
 	}
+	
+	
+	
     
 	/**
 	 * Implements Singleton Design pattern for BitTorrent program
@@ -290,7 +302,9 @@ public class peerProcess {
 			
 		}
 		/* Set maximum number of connections */
+		synchronized(this) {
 		_connections = new Vector<Connection>(_noOfPreferredNeighbors);
+		}
 		/* Loading properties from PeerInfo.cfg */
 		fileName = _currentWorkingDirectory+ "/" + "PeerInfo.cfg";
 		try {
@@ -322,7 +336,7 @@ public class peerProcess {
 					else{
 					
 			      final Connection c1 = new Connection(_peerID,_host,_port,_hasCompleteFile);
-					_connections.add(c1);
+					_peerList.add(c1);
 					
 					}
 				}
@@ -401,11 +415,40 @@ public class peerProcess {
 		initiateConnection();
 	}
 	private void initiateConnection(){
+		Thread taskScheduler = new Thread(new Runnable(){
+			public void run(){
+				while(_connections.size()==0){
+					try {
+						Thread.sleep(2000);
+					} 
+					catch (InterruptedException e) {
+						logger.debug("initiateConnection()",e);
+					}
+				
+				}
+				//schedule setoptimizedneighbor task.
+				Timer optimizedNeighborScheduler = new Timer();
+				optimizedNeighborScheduler.schedule(new TimerTask(){
+					public void run(){
+						selectOptimisticNeighbor();
+					}
+				}, 0, _optimisticUnchokingInterval);
+				//schedule setpreferredneighbor task.
+//				Timer preferredNeighborScheduler = new Timer();
+//				preferredNeighborScheduler.schedule(new TimerTask(){
+//					public void run(){
+//					    selectPreferredNeighbors();
+//					}
+//				}, 0, _unchokingInterval);
+				
+			}
+		});
+		taskScheduler.start();
 		ArrayList<Thread> threadList = new ArrayList<Thread>();
 		try {
 			final ServerSocket welcomeSocket = new ServerSocket(port);
 			
-			for(final Connection c: _connections){
+			for(final Connection c: _peerList){
 				Runnable r1 = new Runnable(){
 					@Override
 					public void run(){
@@ -422,6 +465,9 @@ public class peerProcess {
 								c.set_peerSocket(connection);
 								c.set_oos(new ObjectOutputStream(connection.getOutputStream()));
 								c.set_ois(new ObjectInputStream(connection.getInputStream()));
+								synchronized(this){
+								_connections.add(c);
+								}
 							} catch (IOException e) {
 								e.printStackTrace();
 							}
@@ -435,6 +481,9 @@ public class peerProcess {
 								c.set_peerSocket(connection);
 								c.set_oos(new ObjectOutputStream(connection.getOutputStream()));
 								c.set_ois(new ObjectInputStream(connection.getInputStream()));
+								synchronized(this){
+								_connections.add(c);
+								}
 							}
 							catch(ConnectException cr){
 								try {
@@ -684,7 +733,8 @@ public class peerProcess {
 			return null;
 		}
 		int pieceFileSize = (int) pieceFile.length();
-		/* TODO:sreenidhi 
+		/* 
+		 * TODO:sreenidhi 
 		 * new byte[] parameter can only be int. it does not work for pieces
 		 * whose size is greater than int limit.
 		 */
@@ -746,7 +796,7 @@ public class peerProcess {
     * Selects optimistically unchoked neighbor for every <code>_optimisticUnchokingInterval</code>
     */
    public void selectOptimisticNeighbor(){
-	   
+	   logger.info("in SON");
    }
 	/*
 	 * Creates a directory if it does not exist
@@ -855,10 +905,20 @@ public class peerProcess {
 	}
     public static void main(String[] args){
     	
-    	/* Configure Log Properties */
+
     	PropertyConfigurator.configure("log4j.properties");
-    	
-    	peerProcess peerprocess = peerProcess.getInstance(args[0]);
+    	/* Configuring log file */
+    	SimpleLayout layout = new SimpleLayout();
+    	FileAppender appender;
+		try {
+			appender = new FileAppender(layout,"log_peer_"+args[0]+".log",false);
+			appender.activateOptions();
+		    logger.addAppender(appender);
+		} catch (IOException e) {
+			
+			e.printStackTrace();
+		}
+        peerProcess peerprocess = peerProcess.getInstance(args[0]);
     	peerprocess.test();
     	
     	
