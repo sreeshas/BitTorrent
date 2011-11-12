@@ -42,21 +42,21 @@ import org.apache.log4j.SimpleLayout;
  *
  */
 public class peerProcess {
-	/*
+	/**
 	 * Logger for peerProcess
 	 */
-	private static Logger logger = Logger.getLogger("peerProcess.class");
-	/*
+	public static Logger logger = Logger.getLogger("peerProcess.class");
+	/**
 	 * Represents unique _ID of the Peer.
 	 */
-	private static String _ID;
+	public static String _ID;
 	
 	/*
 	 * List of Connection objects which represent the connections
 	 * to Other peers
 	 * @GuardedBy ("this")
 	 */
-	private static  Vector<Connection> _connections ;
+	public static  Vector<Connection> _connections ;
 	
 	/*
 	 * Represents the only instance of Peer class
@@ -123,18 +123,18 @@ public class peerProcess {
 	 * stored.
 	 */
 	private static String _dataDirectory;
-	/*
+	/**
 	 * temporary directory under @_dataDirectory where file pieces 
 	 * are stored.
 	 */
-	private static String _tempDirectory;
+	public static String _tempDirectory;
 	
-	/*
+	/**
 	 * bitmap stores information about pieces contained by Peer
 	 * @GuardedBy("this")
 	 */
 	
-	private BitSet _bitmap;
+	public static BitSet _bitmap;
 
 	/*
 	 * Contains actual length of data in final piece.
@@ -158,18 +158,19 @@ public class peerProcess {
 	 */
 	private static int _totalPieceCount;
 	
-	/*
+	/**
 	 * Stores <code>_bitmap</code> of each peer with its <code>_ID<code> as key and 
 	 * its corresponding <code>_bitmap</code> as value.
+	 * @GuardedBy (bitfieldLock)
 	 */
 	
-	private Map<String,BitSet> _bitMapper = new ConcurrentHashMap<String,BitSet>();
+	public static Map<String,BitSet> _bitMapper = new ConcurrentHashMap<String,BitSet>();
 	
-	/*
+	/**
 	 * Stores <code>Connection</code> of each peer with its <code>_ID<code> as key and 
 	 * its corresponding <code>Connection</code>object as value.
 	 */
-	private Map<String,Connection> _connectionMap = new ConcurrentHashMap<String,Connection>();
+	public static Map<String,Connection> _connectionMap = new ConcurrentHashMap<String,Connection>();
 	
 	/*
 	 * Represents number of Preferred Neighbors.
@@ -199,37 +200,24 @@ public class peerProcess {
 	 */
     private ArrayList<Connection> _peerList = new ArrayList<Connection>();
     
+    public static Vector<Connection> _interestedList = new Vector<Connection>();
     
-    private Vector<HandShake>  _handShakeQueue = new Vector<HandShake>();
-    
-    private Vector<BitField> _bitfieldQueue = new Vector<BitField>();
-    
-    private Vector<Interested> _interestedQueue = new Vector<Interested>();
-    
-    private Vector<NotInterested> _notInterestedQueue = new Vector<NotInterested>();
-    
-    
-    private Vector<AbstractMessage> _messageQueue = new Vector<AbstractMessage>();
-    
-    private Vector<Have> _haveQueue = new Vector<Have>();
-    
-    private Vector<Piece> _pieceQueue = new Vector<Piece>();
-    
-    private Vector<Request> _requestQueue = new Vector<Request>();
-    
+    public static volatile Boolean programComplete = false;
     
     private Object queuelock = new Object();
     
-    private Object bitfieldLock = new Object();
+    public static Object bitfieldLock = new Object();
     
-    private Object pieceLock = new Object();
+    public static Object pieceLock = new Object();
  	/**
 	 * @return the _currentPieceCount
 	 */
-	private static synchronized int get_currentPieceCount() {
+	public static synchronized int get_currentPieceCount() {
 		return _currentPieceCount;
 	}
-	
+	public static synchronized void set_currentPieceCount() {
+		_currentPieceCount++;
+	}
 	
 	
     
@@ -237,7 +225,7 @@ public class peerProcess {
 	 * Implements Singleton Design pattern for BitTorrent program
 	 * @return Peer
 	 */
-	public static peerProcess getInstance(String peerID){
+	public static synchronized peerProcess getInstance(String peerID){
 		
 		if(_instance==null){
 			/* Set Peer ID */
@@ -501,9 +489,11 @@ public class peerProcess {
 								//start listening on this connection.
 								Thread connectionListener = new Thread(new Runnable(){
 									public void run(){
-										while(true){
+										while(!programComplete){
 											AbstractMessage clientMessage =read(c.get_ois());
-											_messageQueue.add(clientMessage);
+											MessageProcessor mp = new MessageProcessor(clientMessage,c.get_peerID());
+											Thread msgProcessor = new Thread(mp);
+											msgProcessor.start();
 										}
 									}
 								});
@@ -513,7 +503,7 @@ public class peerProcess {
 								}
 								
 							} catch (IOException e) {
-								e.printStackTrace();
+								logger.debug(e);
 							}
 
 						}
@@ -527,9 +517,11 @@ public class peerProcess {
 								c.set_ois(new ObjectInputStream(connection.getInputStream()));
 								Thread connectionListener = new Thread(new Runnable(){
 									public void run(){
-										while(true){
+										while(!programComplete){
 											AbstractMessage clientMessage =read(c.get_ois());
-											_messageQueue.add(clientMessage);
+											MessageProcessor mp = new MessageProcessor(clientMessage,c.get_peerID());
+											Thread msgProcessor = new Thread(mp);
+											msgProcessor.start();
 										}
 									}
 								});
@@ -544,18 +536,15 @@ public class peerProcess {
 									Thread.sleep(2000);
 									run();
 								} catch (InterruptedException e) {
-
-									e.printStackTrace();
+									logger.debug(e);
 								}
-
-
 							}
 							catch (UnknownHostException e) {
-
-								e.printStackTrace();
+								
+								logger.debug(e);
 							} catch (IOException e) {
-
-								e.printStackTrace();
+								logger.debug(e);
+								
 							} 
 
 						}
@@ -586,197 +575,9 @@ public class peerProcess {
 
 	}
     
-	/*
-	 *  Starts message Processing threads.
-	 */
-	private void startMessageProcessingThreads(){
-		Thread genericMessageHandler = new Thread(new Runnable(){
-			public void run(){
-				while(true){
-					if(_messageQueue.isEmpty()){
-						try {
-							Thread.sleep(2000);
-						} catch (InterruptedException e) {
-							logger.debug("Generic Message Queue",e);	
-						}
-					}
-					else {
-						AbstractMessage m1 = _messageQueue.remove(0);
-						messageHandler(m1);
-					}
-				}
-			}
-		});
-		genericMessageHandler.start();
-		Thread  interestedMessageHandler = new Thread(new Runnable(){
-			public void run(){
-				while(true){
-					if(_interestedQueue.isEmpty()){
-						try {
-							Thread.sleep(2000);
-						} catch (InterruptedException e) {
-							logger.debug("Generic Message Queue",e);	
-						}
-					}
-					else{
-						Interested interestedMessage = _interestedQueue.remove(0);
-						Connection c1 = _connectionMap.get(interestedMessage.ID);
-						c1.setInterested(true);
-					}
-				}
-			}
-		});
-		interestedMessageHandler.start();
-		
-		Thread  notInterestedMessageHandler = new Thread(new Runnable(){
-			public void run(){
-				while(true){
-					if(_notInterestedQueue.isEmpty()){
-						try {
-							Thread.sleep(2000);
-						} catch (InterruptedException e) {
-							logger.debug("Generic Message Queue",e);	
-						}
-					}
-					else{
-						NotInterested notInterestedMessage = _notInterestedQueue.remove(0);
-						Connection c1 = _connectionMap.get(notInterestedMessage.ID);
-						c1.setInterested(false);
-					}
-				}
-			}
-		});
-		notInterestedMessageHandler.start();
-		
-		Thread  haveMessageHandler = new Thread(new Runnable(){
-			public void run(){
-				while(true){
-					if(_haveQueue.isEmpty()){
-						try {
-							Thread.sleep(2000);
-						} catch (InterruptedException e) {
-							logger.debug("Generic Message Queue",e);	
-						}
-					}
-					else{
-						Have haveMessage = _haveQueue.remove(0);
-						//get the corresponding bitset.
-						//set the corresponding bit.
-						synchronized(bitfieldLock){
-						BitSet peerBitSet = _bitMapper.get(haveMessage.ID);
-						peerBitSet.set(haveMessage._pieceIndex);
-						}
-						
-					}
-				}
-			}
-		});
-		haveMessageHandler.start();
-		Thread  bitFieldMessageHandler = new Thread(new Runnable(){
-			public void run(){
-				while(true){
-					if(_bitfieldQueue.isEmpty()){
-						try {
-							Thread.sleep(2000);
-						} catch (InterruptedException e) {
-							logger.debug("Generic Message Queue",e);	
-						}
-					}
-					else{
-						BitField bitFieldMessage = _bitfieldQueue.remove(0);
-						
-						synchronized(bitfieldLock){
-						BitSet peerBitSet = _bitMapper.get(bitFieldMessage.ID);
-						peerBitSet = bitFieldMessage._bitMap;
-						}
-						
-					}
-				}
-			}
-		});
-		bitFieldMessageHandler.start();
-		Thread  pieceMessageHandler = new Thread(new Runnable(){
-			public void run(){
-				while(true){
-					if(_pieceQueue.isEmpty()){
-						try {
-							Thread.sleep(2000);
-						} catch (InterruptedException e) {
-							logger.debug("Generic Message Queue",e);	
-						}
-					}
-					else{
-						Piece pieceMessage = _pieceQueue.remove(0);
-						
-						synchronized(pieceLock){
-						 putPiece(pieceMessage.pieceBytes,pieceMessage.pieceIndex);
-						}
-						synchronized(this){
-						synchronized(bitfieldLock){
-							_bitmap.set(pieceMessage.pieceIndex,true);
-						
-						 _bitMapper.put(_ID,_bitmap);
-						}
-						}
-						// Broadcast Have Message to everyone.
-						
-					}
-				}
-			}
-		});
-		pieceMessageHandler.start();
-		Thread  requestMessageHandler = new Thread(new Runnable(){
-			public void run(){
-				while(true){
-					if(_requestQueue.isEmpty()){
-						try {
-							Thread.sleep(2000);
-						} catch (InterruptedException e) {
-							logger.debug("Generic Message Queue",e);	
-						}
-					}
-					else{
-						Request requestMessage = _requestQueue.remove(0);
-						//Construct Request Message and Send them across.
-						
-						
-						
-					}
-				}
-			}
-		});
-		requestMessageHandler.start();
-		
-		
-	}
 	
-	private void messageHandler(AbstractMessage m1){
-		switch(m1.type){
-			case 0: //choke
-				break;
-			case 1: //unchoke
-				break;
-			case 2: //interested
-				     _interestedQueue.add((Interested)m1);
-				break;
-			case 3: //notinterested
-				     _notInterestedQueue.add((NotInterested)m1);
-				break;
-			case 4: //have
-				     _haveQueue.add((Have)m1);
-				break;
-			case 5: //bitfield
-				     _bitfieldQueue.add((BitField)m1);
-				break;
-			case 6: //request
-				     _requestQueue.add((Request)m1);
-				break;
-			case 7: //piece
-				     _pieceQueue.add((Piece)m1);
-				break;
-				 
-		}
-	}
+	
+	
 	/*
 	 * 1) Create a temp directory under data directory
 	 * 2) Split the file into @_totalPieceCount  number of Pieces
@@ -949,11 +750,11 @@ public class peerProcess {
 		}
 		return unchokedList;
 	}
-	/*
+	/**
 	 * Inserts "pieceNumber" file into _tempDirectory.
 	 * 
 	 */
-	private void putPiece(byte[] fileBytes, int pieceNumber){
+	public static synchronized void putPiece(byte[] fileBytes, int pieceNumber){
 		
 		try {
 			OutputStream out = new FileOutputStream(_tempDirectory+"/"+pieceNumber);
@@ -965,12 +766,12 @@ public class peerProcess {
 		}
 		
 	}
-	/*
+	/**
 	 * Returns content as byte array of piece "pieceNumber" which is 
 	 * present in _tempDirectory
 	 * 
 	 */
-	private byte[] getPiece(int pieceNumber){
+	public static synchronized byte[] getPiece(int pieceNumber){
 		File pieceFile = new File(_tempDirectory+"/"+pieceNumber);
 		if(!pieceFile.exists()){
 			logger.info("Piece requested does not exist. PieceNumber = "+pieceNumber);
@@ -1125,7 +926,7 @@ public class peerProcess {
 	 * @param aM
 	 * Used to write Messages to hosts
 	 */
-	public void write(ObjectOutputStream oos, AbstractMessage aM){
+	public static synchronized void write(ObjectOutputStream oos, AbstractMessage aM){
 		try {
 			oos.writeObject(aM);
 			oos.flush();

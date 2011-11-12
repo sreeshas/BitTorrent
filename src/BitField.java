@@ -10,4 +10,10 @@ public class BitField extends AbstractMessage{
 	 * Stores type number of Choke Message;
 	 */
 	public int type=5;
+	
+	public BitField(BitSet _bitMap){
+		super(5);
+		this._bitMap = _bitMap;
+		
+	}
 }

@@ -9,5 +9,8 @@ public class Have extends AbstractMessage{
 	 */
 	public int type=4;
 	
-	
+	public Have(int _peiceIndex) {
+		super(4);
+		this._pieceIndex = _peiceIndex;
+	}
 }

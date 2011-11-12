@@ -12,11 +12,10 @@ public class AbstractMessage {
 	 *  Represents type of Message.
 	 */
 	public int type;
-	/**
-	 * Represents ID of the Peer sending the message.
-	 */
-	public String ID;
 	
+	AbstractMessage(int type){
+		this.type = type;
+	}
 	
 	
 }
