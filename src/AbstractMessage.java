@@ -1,9 +1,11 @@
+import java.io.Serializable;
+
 /*
  * Represents the Abstract Message Class 
  * which provides the generic structure for
  * Messages exchanged between Peers
  */
-public class AbstractMessage {
+public abstract class AbstractMessage implements Serializable{
     /**
      *  Represents length of the Message.
      */

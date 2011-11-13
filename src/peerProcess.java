@@ -13,16 +13,21 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.net.ConnectException;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
+import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -142,14 +147,16 @@ public class peerProcess {
 	
 	private static int _spillOver;
 	
-	/*
+	/**
 	 *  Represents a list which contains Piece Index already requested
 	 *  from other peers.
 	 *  When making a request for a Piece, Piece Index is first checked 
 	 *  with @requestList and only if the Piece is not requested,
 	 *  it is added to requestList and a request is made.
 	 */
-	private Vector<Integer> requestList = new Vector<Integer>();
+	
+	
+	public static Map<String,Vector<Integer>> requestedMap = new ConcurrentHashMap<String,Vector<Integer>>();
 	
 	/*
 	 * Represents total number of pieces required 
@@ -181,7 +188,7 @@ public class peerProcess {
 	 * Indicates total number of Pieces with the Peer.
 	 * @GuardedBy("this")
 	 */
-	private static volatile int _currentPieceCount;
+	private static volatile int _currentPieceCount = 0;
 	
 	
 	/*
@@ -203,6 +210,12 @@ public class peerProcess {
     public static Vector<Connection> _interestedList = new Vector<Connection>();
     
     public static volatile Boolean programComplete = false;
+    
+    public static volatile Vector<String> validRequestList = new Vector<String>();
+    
+    public static volatile Vector<String> unchokedList = new Vector<String>();
+    
+    public static volatile Connection optimisticNeighbor = null;
     
     private Object queuelock = new Object();
     
@@ -236,6 +249,32 @@ public class peerProcess {
 		return _instance;
 	}
 	
+	public static synchronized boolean isRequested(int PieceID) {
+		Collection<Vector<Integer>> pieceIDs =  requestedMap.values();
+		Iterator<Vector<Integer>> valueIterator = pieceIDs.iterator();
+		while(valueIterator.hasNext()) {
+			Vector<Integer> requested = (Vector<Integer>) valueIterator.next();
+			if(requested.contains(PieceID)) {
+				return true;
+			}
+		}
+		return false;
+	}
+	
+	public static synchronized void removeRequested(int PieceID){
+		Collection<Vector<Integer>> pieceIDs =  requestedMap.values();
+		Iterator<Vector<Integer>> valueIterator = pieceIDs.iterator();
+		while(valueIterator.hasNext()) {
+			Vector<Integer> requested = (Vector<Integer>) valueIterator.next();
+			if(requested.contains(PieceID)) {
+				int index = requested.indexOf(PieceID);
+				
+				requested.remove(index);
+				return;
+			}
+		}
+		
+	}
 	/*
 	 * Constructor is made Private to enforce singleton Design pattern
 	 */
@@ -255,7 +294,7 @@ public class peerProcess {
 	 */
 	private synchronized void incrementPieces(int PieceID){
 		if( _bitmap.get(PieceID) == false ) {
-			_currentPieceCount++;
+			set_currentPieceCount();
 			_bitmap.set(PieceID);
 		}
 		
@@ -316,10 +355,10 @@ public class peerProcess {
 			//logger.info("_noOfPreferredNeighbors" +" "+"_unchokingInterval"+" "+" _optimisticUnchokingInterval"+" "+"_fileName"+" "+"_fileSize"+" "+"_pieceSize");
 			//logger.info(_noOfPreferredNeighbors +" "+_unchokingInterval+" "+ _optimisticUnchokingInterval+" "+_fileName+" "+_fileSize+" "+_pieceSize);
 		} catch (FileNotFoundException e) {
-			logger.info(e);
+			e.printStackTrace();
 			
 		} catch (IOException e) {
-			logger.info(e);
+			e.printStackTrace();
 			
 		}
 		/* Set maximum number of connections */
@@ -340,6 +379,10 @@ public class peerProcess {
 				while(st.hasMoreTokens()){
 					String _peerID = st.nextToken();
 					String _host = st.nextToken();
+					
+					InetAddress addr = InetAddress.getByName(_host);
+					_host = addr.getHostAddress();
+					
 					int _port = Integer.parseInt(st.nextToken());
 					Boolean _hasCompleteFile;
 					if(Integer.parseInt(st.nextToken())==1){
@@ -357,6 +400,7 @@ public class peerProcess {
 					else{
 					
 			      final Connection c1 = new Connection(_peerID,_host,_port,_hasCompleteFile);
+			         
 					_peerList.add(c1);
 					_connectionMap.put(c1.get_peerID(),c1);
 					}
@@ -401,9 +445,10 @@ public class peerProcess {
 			_spillOver = _fileSize%_pieceSize;
 
 		}
-		
+		logger.info("Total piece count " + _totalPieceCount);
 		/* Set _bitmap */
 		_bitmap = new BitSet(_totalPieceCount);
+		
 		
 		
 
@@ -429,13 +474,10 @@ public class peerProcess {
 		initiateConnection();
 	}
 	private void leechFunction(){
-		intializeLeech();
-	}
-	private void intializeLeech() {
 		
 		initiateConnection();
 	}
-	private void initiateConnection(){
+	private void startBackgroundThreads() {
 		Thread taskScheduler = new Thread(new Runnable(){
 			public void run(){
 				while(_connections.size()==0){
@@ -448,12 +490,23 @@ public class peerProcess {
 				
 				}
 				//schedule setoptimizedneighbor task.
-				Timer optimizedNeighborScheduler = new Timer();
+				final Timer optimizedNeighborScheduler = new Timer();
 				optimizedNeighborScheduler.schedule(new TimerTask(){
 					public void run(){
 						selectOptimisticNeighbor();
 					}
 				}, 0, _optimisticUnchokingInterval);
+				
+				final Timer pcompletionChecker = new Timer();
+				pcompletionChecker.schedule(new TimerTask(){
+					public void run() {
+						if(true==completionChecker()){
+							optimizedNeighborScheduler.cancel();
+							programComplete =true;
+							pcompletionChecker.cancel();
+						}
+					}
+				},0,10000);
 				//schedule setpreferredneighbor task.
 //				Timer preferredNeighborScheduler = new Timer();
 //				preferredNeighborScheduler.schedule(new TimerTask(){
@@ -465,33 +518,124 @@ public class peerProcess {
 			}
 		});
 		taskScheduler.start();
-		ArrayList<Thread> threadList = new ArrayList<Thread>();
+	}
+	
+	private boolean completionChecker()
+	{
+		Collection<BitSet> set = _bitMapper.values();
+		List<BitSet> valueList = new ArrayList<BitSet>(set);
+		BitSet main = new BitSet(_totalPieceCount);
+		main.set(0, _totalPieceCount);
+		main.set(_totalPieceCount);
+		for(BitSet bs : valueList)
+		{
+			main.and(bs);			
+		}
+		
+		if(main.nextClearBit(0) == _totalPieceCount)
+		{
+			
+			return true;
+		}
+		
+		return false;
+		
+	}
+	private void initiateConnection(){
+		
+		startBackgroundThreads();
 		try {
+			
 			final ServerSocket welcomeSocket = new ServerSocket(port);
+			
 			
 			for(final Connection c: _peerList){
 				Runnable r1 = new Runnable(){
 					@Override
 					public void run(){
-						if(c.get_peerSocket()!=null){
-
-						}
+						
 						Socket connection = null;
 						if(Integer.parseInt(c.get_peerID()) > Integer.parseInt(_ID)){
-
+                               
 							try {
+								Connection correctConnection = null;
+								synchronized(this){
 								connection = welcomeSocket.accept();
+								}
+								InetAddress addr = connection.getInetAddress();
+								String hostname = addr.getHostAddress();
 								
-								logger.info("Peer"+" "+_ID+" "+"is connected from"+" "+"Peer"+c.get_peerID());
-								c.set_peerSocket(connection);
-								c.set_oos(new ObjectOutputStream(connection.getOutputStream()));
-								c.set_ois(new ObjectInputStream(connection.getInputStream()));
+							
+								for(Connection c1:_peerList){
+									if(c1.get_host().equals(hostname)) {
+										
+										correctConnection = c1;
+										logger.info("Peer"+" "+_ID+" "+"is connected from"+" "+"Peer"+correctConnection.get_peerID());
+										break;
+										
+									}
+								}
+								   
+								
+								correctConnection.set_peerSocket(connection);
+								correctConnection.set_oos(new ObjectOutputStream(connection.getOutputStream()));
+								correctConnection.set_ois(new ObjectInputStream(connection.getInputStream()));
+								    // Get hostname by textual representation of IP address
+								   
+								
+								
+								
+								
 								//start listening on this connection.
+								/*
+								 * HandShake and BitField Processing.
+								 */
+								
+								HandShake hs = new HandShake(Integer.parseInt(_ID));
+								
+								try{
+								correctConnection.get_oos().writeObject(hs);
+								correctConnection.get_oos().flush();
+								}
+								catch(Exception ex){
+									ex.printStackTrace();
+									logger.info(ex);
+								}
+								
+								try {
+									HandShake recievedHandShake = null;
+									
+									while(recievedHandShake==null){
+										
+										recievedHandShake  = (HandShake)correctConnection.get_ois().readObject();
+										logger.info("Expecting "+correctConnection.get_peerID() +" Received "+recievedHandShake.get_peerID());
+									}
+									
+								    if(Constants.HANDSHAKE_HEADER.equals(recievedHandShake.get_header())){
+								    	if(recievedHandShake.get_peerID()==Integer.parseInt(correctConnection.get_peerID())){
+								    		logger.info("writing bitfield");
+								    		BitField  bf = new BitField(_bitmap);
+								    		write(correctConnection.get_oos(),bf);
+								    	}
+								    	else{
+								    		logger.info("bf failed");
+								    	}
+								    	
+								    }
+								    else {
+								    	logger.info("hs failed");
+								    }
+								} catch (Exception e) {
+									logger.info(e);
+									e.printStackTrace();
+								}
+								
+								final Connection correctlistenerConnection = correctConnection;
 								Thread connectionListener = new Thread(new Runnable(){
 									public void run(){
 										while(!programComplete){
-											AbstractMessage clientMessage =read(c.get_ois());
-											MessageProcessor mp = new MessageProcessor(clientMessage,c.get_peerID());
+											AbstractMessage clientMessage =read(correctlistenerConnection.get_ois());
+											MessageProcessor mp = new MessageProcessor(clientMessage,correctlistenerConnection.get_peerID());
 											Thread msgProcessor = new Thread(mp);
 											msgProcessor.start();
 										}
@@ -499,22 +643,63 @@ public class peerProcess {
 								});
 								connectionListener.start();
 								synchronized(this){
-								_connections.add(c);
+								_connections.add(correctConnection);
 								}
 								
 							} catch (IOException e) {
 								logger.debug(e);
+								e.printStackTrace();
 							}
 
 						}
 						else{
 
 							try {
+								
 								connection = new Socket(c.get_host(),c.get_port());
 								logger.info("Peer"+" "+_ID+" "+"makes connection to"+" "+"Peer"+c.get_peerID());
 								c.set_peerSocket(connection);
 								c.set_oos(new ObjectOutputStream(connection.getOutputStream()));
 								c.set_ois(new ObjectInputStream(connection.getInputStream()));
+								
+								/*
+								 * HandShake and BitField Processing.
+								 */
+								HandShake hs = new HandShake(Integer.parseInt(_ID));
+								
+								
+								try{
+									c.get_oos().writeObject(hs);
+									c.get_oos().flush();
+									}
+									catch(Exception ex){
+										logger.info(ex);
+										ex.printStackTrace();
+									}
+								
+								try {
+									
+									HandShake recievedHandShake = null;
+									
+									while(recievedHandShake==null){
+										recievedHandShake  = (HandShake)c.get_ois().readObject();
+									}
+									
+								    if(Constants.HANDSHAKE_HEADER.equals(recievedHandShake.get_header())){
+								    	if(recievedHandShake.get_peerID()==Integer.parseInt(c.get_peerID())){
+								    		logger.info("writing bitfield");
+								    		BitField  bf = new BitField(_bitmap);
+								    		write(c.get_oos(),bf);
+								    	}
+								    	
+								    }
+								   
+								} catch (Exception e) {
+									logger.info(e);
+									e.printStackTrace();
+									
+								}
+								
 								Thread connectionListener = new Thread(new Runnable(){
 									public void run(){
 										while(!programComplete){
@@ -532,19 +717,21 @@ public class peerProcess {
 							}
 							catch(ConnectException cr){
 								try {
-									logger.info("Waiting for other peers to start");
+									
 									Thread.sleep(2000);
 									run();
 								} catch (InterruptedException e) {
 									logger.debug(e);
+									e.printStackTrace();
 								}
 							}
 							catch (UnknownHostException e) {
 								
 								logger.debug(e);
+								e.printStackTrace();
 							} catch (IOException e) {
 								logger.debug(e);
-								
+								e.printStackTrace();
 							} 
 
 						}
@@ -553,7 +740,7 @@ public class peerProcess {
 
 				Thread t1 = new Thread(r1);
 				t1.start();
-				threadList.add(t1);
+				
 				
 				
 
@@ -562,16 +749,8 @@ public class peerProcess {
 			logger.info(e);
 			e.printStackTrace();
 		}
-		for(Thread t: threadList){
-			try {
-				t.join();
-			} catch (InterruptedException e) {
-				
-				e.printStackTrace();
-			}
-		}
-
-		logger.info("All peers are now connected.");
+		
+		
 
 	}
     
@@ -662,28 +841,33 @@ public class peerProcess {
 	 * 
 	 * tested for above test cases.
 	 */
-	private synchronized int  compareBitmap( BitSet peerBitmap){
+	public static synchronized int  compareBitmap( BitSet peerBitmap){
 		
+		ArrayList<Integer> missingBits = new ArrayList<Integer>();
 		if(_hasCompleteFile){
 			/* if peer has Complete File ,comparing bitmaps is not required.*/
 			return -1;
 		}
 		int index = 0;
-		while(index != -1){
+		while( index < _totalPieceCount){
 			/* Find the index of next bit which is set to false starting from <code>index</code>*/
 			
 			index = _bitmap.nextClearBit(index);
-		    
-			if(index != -1) {
-				if(peerBitmap.get(index)){
-					/* return index, when _bitmap does not have the bit set whereas peerBitmap bit is set. */
-					return index;
-				}
-			}
 			
+			if(peerBitmap.get(index)) {
+				/* return index, when _bitmap does not have the bit set whereas peerBitmap bit is set. */
+				missingBits.add(index);
+				
+			}
+				index++;
+		}
+		if(missingBits.size()==0) {
+			return -1;
+		}
+		else {
+			return missingBits.get(new Random().nextInt(missingBits.size()));
 		}
 		
-		return -1;
 	}
 	
 	/*
@@ -839,9 +1023,26 @@ public class peerProcess {
    }
    /**
     * Selects optimistically unchoked neighbor for every <code>_optimisticUnchokingInterval</code>
+    *
+    *    1) if optimisticNeighbor is selected in previous interval, choke him.
+    *    2) Select optimisticNeighbor from interestedList randomly for this interval.
+    *    3) Unchoke him
     */
    public void selectOptimisticNeighbor(){
-	   logger.info("in SON");
+	  
+	   if(_interestedList.size()==0){
+		   return;
+	   }
+	   if( optimisticNeighbor != null ) {
+		   Choke chokeOptimistic = new Choke();
+		   write(optimisticNeighbor.get_oos(),chokeOptimistic);
+		   unchokedList.remove(optimisticNeighbor.get_peerID());
+	   }
+	   Connection newOptimisticNeighbor = _interestedList.get(new Random().nextInt(_interestedList.size()));
+	   optimisticNeighbor = newOptimisticNeighbor;
+	   Unchoke unchokeOptimistic = new Unchoke();
+	   write(newOptimisticNeighbor.get_oos(), unchokeOptimistic);
+	   unchokedList.add(newOptimisticNeighbor.get_peerID());
    }
 	/*
 	 * Creates a directory if it does not exist

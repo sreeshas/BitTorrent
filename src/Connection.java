@@ -8,6 +8,42 @@ import java.net.Socket;
  *
  */
 public final class Connection {
+	/* (non-Javadoc)
+	 * @see java.lang.Object#toString()
+	 */
+	@Override
+	public String toString() {
+		return "Connection [_peerID=" + _peerID + "]";
+	}
+	/* (non-Javadoc)
+	 * @see java.lang.Object#hashCode()
+	 */
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + ((_peerID == null) ? 0 : _peerID.hashCode());
+		return result;
+	}
+	/* (non-Javadoc)
+	 * @see java.lang.Object#equals(java.lang.Object)
+	 */
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		Connection other = (Connection) obj;
+		if (_peerID == null) {
+			if (other._peerID != null)
+				return false;
+		} else if (!_peerID.equals(other._peerID))
+			return false;
+		return true;
+	}
 	/*
 	 * _ID of the peer to whom this connection belongs.
 	 */
